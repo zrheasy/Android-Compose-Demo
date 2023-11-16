@@ -8,6 +8,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -29,10 +32,13 @@ import androidx.compose.ui.unit.sp
 import androidx.constraintlayout.compose.ConstraintLayout
 import androidx.constraintlayout.compose.Dimension
 import com.compose.demo.R
+import com.compose.demo.entity.RoomMessageEntity
 import com.compose.demo.route.getNavController
 import com.compose.demo.widget.Space
 import com.compose.demo.widget.onClick
 import com.compose.demo.widget.rememberStateOf
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  *
@@ -47,6 +53,17 @@ fun RoomPage() {
     val navHostController = getNavController()
     var showExitWindow by rememberStateOf(value = false)
     var showInput by rememberStateOf(value = false)
+
+    val messageList = remember {
+        mutableStateListOf<RoomMessageEntity>().apply {
+            add(RoomMessageEntity("Welcome to Yalla. Please respect each otherand chat in a decent manner"))
+        }
+    }
+
+    val listState = rememberLazyListState()
+    LaunchedEffect(messageList.size) {
+        listState.animateScrollToItem(messageList.lastIndex)
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Image(
@@ -95,17 +112,24 @@ fun RoomPage() {
             RoomBottomLayout(modifier = Modifier.constrainAs(inputLayout) {
                 bottom.linkTo(parent.bottom, margin = 10.dp)
             }) {
-                showInput = true
+                when (it) {
+                    0 -> showInput = true
+                    1 -> {
+                        messageList.add(RoomMessageEntity("😄😄😄"))
+                    }
+                }
             }
 
-            RoomMessageLayout(modifier = Modifier.constrainAs(messageLayout) {
-                top.linkTo(seatLayout.bottom, margin = 10.dp)
-                start.linkTo(parent.start)
-                end.linkTo(parent.end)
-                bottom.linkTo(inputLayout.top, margin = 10.dp)
-                width = Dimension.fillToConstraints
-                height = Dimension.fillToConstraints
-            })
+            RoomMessageLayout(messageList,
+                              listState,
+                              modifier = Modifier.constrainAs(messageLayout) {
+                                  top.linkTo(seatLayout.bottom)
+                                  start.linkTo(parent.start)
+                                  end.linkTo(parent.end)
+                                  bottom.linkTo(inputLayout.top, margin = 10.dp)
+                                  width = Dimension.fillToConstraints
+                                  height = Dimension.fillToConstraints
+                              })
         }
 
         RoomExitLayout(showExitWindow = showExitWindow) { type ->
@@ -115,12 +139,14 @@ fun RoomPage() {
             }
         }
 
-        BackHandler(showExitWindow) {
-            showExitWindow = false
+        BackHandler(true) {
+            showExitWindow = !showExitWindow
         }
 
         RoomInputLayout(showInput) {
-            showInput = false
+            if (it.isNotBlank()) {
+                messageList.add(RoomMessageEntity(it))
+            }
         }
 
         val imeVisible = WindowInsets.isImeVisible
@@ -277,23 +303,37 @@ fun RoomSeatItem(position: Int, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun RoomMessageLayout(modifier: Modifier = Modifier) {
-    LazyColumn(modifier = modifier) {
-        item {
-            Box(
-                modifier = Modifier
-                    .offset(x = 20.dp)
-                    .fillParentMaxWidth(0.7413f)
-                    .wrapContentSize(Alignment.TopStart)
-                    .background(Color(0x4D000000), RoundedCornerShape(7.dp))
-                    .padding(12.dp)
-            ) {
-                Text(
-                    text = "Welcome to Yalla. Please respect each otherand chat in a decent manner",
-                    color = Color(0xFFD085FC),
-                    fontSize = 14.sp
+fun RoomMessageLayout(
+    messageList: List<RoomMessageEntity>, listState: LazyListState, modifier: Modifier = Modifier
+) {
+    LazyColumn(modifier = modifier, listState) {
+        items(messageList) {
+            RoomMessageItem(item = it)
+        }
+    }
+}
+
+@Composable
+fun RoomMessageItem(item: RoomMessageEntity) {
+    ConstraintLayout(modifier = Modifier.fillMaxWidth()) {
+        val (msg) = createRefs()
+        Box(modifier = Modifier
+            .constrainAs(msg) {
+                linkTo(
+                    start = parent.start,
+                    end = parent.end,
+                    bias = 0f,
+                    startMargin = 20.dp,
+                    endMargin = 77.dp
                 )
+                top.linkTo(parent.top, margin = 10.dp)
+                width = Dimension.preferredWrapContent
+                height = Dimension.wrapContent
             }
+            .wrapContentSize(Alignment.TopStart)
+            .background(Color(0x4D000000), RoundedCornerShape(7.dp))
+            .padding(12.dp)) {
+            Text(text = item.text, color = Color(0xFFD085FC), fontSize = 14.sp)
         }
     }
 }
@@ -324,7 +364,7 @@ fun RoomBottomLayout(modifier: Modifier = Modifier, onClick: (type: Int) -> Unit
                   bottom.linkTo(parent.bottom)
                   width = Dimension.percent(0.0907f)
                   height = Dimension.ratio("1:1")
-              })
+              }.onClick { onClick(1) })
 
         Image(painter = painterResource(id = R.mipmap.ic_room_input_sound),
               contentDescription = "",
@@ -371,14 +411,15 @@ fun RoomBottomLayout(modifier: Modifier = Modifier, onClick: (type: Int) -> Unit
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun RoomInputLayout(visible: Boolean, onClick: (type: Int) -> Unit) {
+fun RoomInputLayout(visible: Boolean, onSubmit: (text: String) -> Unit) {
     val keyboard = LocalSoftwareKeyboardController.current
 
-    if (visible){
-        Box(modifier = Modifier.fillMaxSize().imePadding().onClick { onClick(0) }) {
+    if (visible) {
+        Box(modifier = Modifier.fillMaxSize().imePadding().onClick { keyboard?.hide() }) {
             val focusRequester = remember { FocusRequester() }
-            var text by rememberStateOf(value = "")
-            LaunchedEffect(focusRequester){
+            var text by rememberStateOf(value = "随便发点什么😁")
+            LaunchedEffect(focusRequester) {
+                delay(100)
                 focusRequester.requestFocus()
                 keyboard?.show()
             }
@@ -405,11 +446,14 @@ fun RoomInputLayout(visible: Boolean, onClick: (type: Int) -> Unit) {
                     )
                 }
                 Space(width = 10.dp)
-                Image(painter = painterResource(id = R.mipmap.ic_room_send), contentDescription = "")
+                Image(painter = painterResource(id = R.mipmap.ic_room_send),
+                      contentDescription = "",
+                      modifier = Modifier.onClick {
+                          keyboard?.hide()
+                          onSubmit(text)
+                      })
                 Space(width = 10.dp)
             }
         }
-    }else{
-        keyboard?.hide()
     }
 }
